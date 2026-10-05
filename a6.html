@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>星際防衛｜太空射擊</title>
+    <style>
+        *{box-sizing:border-box}body{margin:0;min-height:100vh;background:#050816;color:#eaf6ff;font:16px system-ui,sans-serif;display:grid;place-items:center;padding:18px}
+        .game{width:min(100%,720px);text-align:center}.top{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:0 4px 10px}h1{font-size:clamp(20px,5vw,30px);margin:0;color:#7ee7ff}.stats{display:flex;gap:16px;font-weight:700}.stats span{color:#ffdf70}
+        canvas{display:block;width:100%;aspect-ratio:7/5;background:linear-gradient(#080d29,#101637);border:1px solid #345075;border-radius:12px;box-shadow:0 0 35px #1670aa33;touch-action:none}
+        .controls{display:flex;justify-content:center;gap:10px;flex-wrap:wrap;margin:12px 0}.button{border:1px solid #416486;border-radius:8px;background:#142440;color:#eaf6ff;padding:9px 16px;font:inherit;cursor:pointer}.button:hover{background:#1d3558}.hint{font-size:13px;color:#9eb1cc;margin:8px 0}
+        .overlay{position:fixed;inset:0;background:#020614bb;display:grid;place-items:center;padding:20px}.card{max-width:420px;padding:28px;background:#101a35;border:1px solid #416486;border-radius:16px;box-shadow:0 15px 60px #0009}.card h2{color:#7ee7ff;margin-top:0}.card p{line-height:1.6;color:#c1d0e6}.hidden{display:none}
+    </style>
+</head>
+<body>
+    <main class="game">
+        <header class="top"><h1>✦ 星際防衛 ✦</h1><div class="stats">分數 <span id="score">0</span>　生命 <span id="lives">3</span></div></header>
+        <canvas id="screen" aria-label="太空射擊遊戲"></canvas>
+        <div class="controls"><button class="button" id="start">開始遊戲</button><button class="button" id="sound">🔊 音效：開</button></div>
+        <p class="hint">移動：← → 或 A / D　｜　射擊：空白鍵　｜　手機：觸控並拖曳</p>
+    </main>
+    <div class="overlay" id="overlay"><section class="card"><h2 id="messageTitle">準備出擊！</h2><p id="message">駕駛戰機擊退敵軍。移動並按空白鍵射擊；遊戲開始後會播放射擊與爆炸音效。</p><button class="button" id="play">開始遊戲</button></section></div>
+<script>
+(() => {
+    const canvas=document.getElementById('screen'),ctx=canvas.getContext('2d');
+    const scoreEl=document.getElementById('score'),livesEl=document.getElementById('lives'),overlay=document.getElementById('overlay');
+    let w=700,h=500,playing=false,score=0,lives=3,keys={},bullets=[],enemies=[],stars=[],lastShot=0,lastSpawn=0,lastTime=0,audio=null,soundOn=true;
+    const ship={x:350,y:440};
+    function resize(){const r=canvas.getBoundingClientRect(),dpr=Math.min(devicePixelRatio||1,2);w=r.width;h=r.height;canvas.width=w*dpr;canvas.height=h*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);ship.y=h-48;if(!ship.x||ship.x>w)ship.x=w/2;stars=Array.from({length:75},()=>({x:Math.random()*w,y:Math.random()*h,s:Math.random()*1.8+.4,v:Math.random()*35+15}))}
+    function tone(freq,duration,type='sine',volume=.045){if(!soundOn)return;try{audio=audio||new(window.AudioContext||window.webkitAudioContext)();if(audio.state==='suspended')audio.resume();const o=audio.createOscillator(),g=audio.createGain();o.type=type;o.frequency.setValueAtTime(freq,audio.currentTime);o.frequency.exponentialRampToValueAtTime(Math.max(35,freq*.45),audio.currentTime+duration);g.gain.setValueAtTime(volume,audio.currentTime);g.gain.exponentialRampToValueAtTime(.001,audio.currentTime+duration);o.connect(g);g.connect(audio.destination);o.start();o.stop(audio.currentTime+duration)}catch(e){}}
+    function start(){score=0;lives=3;bullets=[];enemies=[];playing=true;lastTime=performance.now();scoreEl.textContent=score;livesEl.textContent=lives;overlay.classList.add('hidden');tone(520,.16,'triangle');requestAnimationFrame(loop)}
+    function finish(){playing=false;document.getElementById('messageTitle').textContent='任務結束';document.getElementById('message').textContent=`最終分數：${score}。再試一次，擊退更多敵機！`;overlay.classList.remove('hidden');tone(220,.5,'sawtooth')}
+    function drawShip(){ctx.save();ctx.translate(ship.x,ship.y);ctx.fillStyle='#68e7ff';ctx.shadowColor='#40ddff';ctx.shadowBlur=14;ctx.beginPath();ctx.moveTo(0,-19);ctx.lineTo(14,14);ctx.lineTo(0,8);ctx.lineTo(-14,14);ctx.closePath();ctx.fill();ctx.fillStyle='#ffb84d';ctx.beginPath();ctx.moveTo(-5,13);ctx.lineTo(0,23+Math.random()*7);ctx.lineTo(5,13);ctx.fill();ctx.restore()}
+    function loop(now){if(!playing)return;const dt=Math.min((now-lastTime)/1000,.04);lastTime=now;ctx.clearRect(0,0,w,h);
+        ctx.fillStyle='#fff';for(const s of stars){s.y+=s.v*dt;if(s.y>h){s.y=0;s.x=Math.random()*w}ctx.globalAlpha=.35+s.s/3;ctx.fillRect(s.x,s.y,s.s,s.s)}ctx.globalAlpha=1;
+        if(keys.ArrowLeft||keys.a||keys.A)ship.x-=300*dt;if(keys.ArrowRight||keys.d||keys.D)ship.x+=300*dt;ship.x=Math.max(18,Math.min(w-18,ship.x));
+        if((keys[' ']||keys.Space)&&now-lastShot>220){bullets.push({x:ship.x,y:ship.y-18});lastShot=now;tone(760,.09,'square',.025)}
+        if(now-lastSpawn>Math.max(280,850-score*2)){enemies.push({x:20+Math.random()*(w-40),y:-20,v:85+Math.random()*55+score*.4});lastSpawn=now}
+        ctx.fillStyle='#82f4ff';for(const b of bullets){b.y-=440*dt;ctx.fillRect(b.x-2,b.y-9,4,13)}bullets=bullets.filter(b=>b.y>-15);
+        for(const e of enemies){e.y+=e.v*dt;ctx.fillStyle='#ff668a';ctx.shadowColor='#ff315e';ctx.shadowBlur=10;ctx.beginPath();ctx.moveTo(e.x,e.y+12);ctx.lineTo(e.x-13,e.y-8);ctx.lineTo(e.x,e.y-3);ctx.lineTo(e.x+13,e.y-8);ctx.closePath();ctx.fill();ctx.shadowBlur=0;
+            const bi=bullets.findIndex(b=>Math.hypot(b.x-e.x,b.y-e.y)<19);if(bi>=0){bullets.splice(bi,1);e.dead=true;score+=10;scoreEl.textContent=score;tone(180,.18,'triangle',.06)}
+            else if(e.y>h+10){e.dead=true;lives--;livesEl.textContent=lives;tone(120,.3,'sawtooth');if(lives<=0){finish();return}}
+        }enemies=enemies.filter(e=>!e.dead);drawShip();requestAnimationFrame(loop)
+    }
+    document.addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight',' '].includes(e.key))e.preventDefault();keys[e.key]=true;if(e.key==='Enter'&&!playing)start()});document.addEventListener('keyup',e=>keys[e.key]=false);
+    canvas.addEventListener('pointermove',e=>{if(e.buttons){const r=canvas.getBoundingClientRect();ship.x=e.clientX-r.left}});canvas.addEventListener('pointerdown',()=>{if(!playing)return;bullets.push({x:ship.x,y:ship.y-18});tone(760,.09,'square',.025)});
+    document.getElementById('start').onclick=start;document.getElementById('play').onclick=start;document.getElementById('sound').onclick=e=>{soundOn=!soundOn;e.currentTarget.textContent=soundOn?'🔊 音效：開':'🔇 音效：關';if(soundOn)tone(520,.12)};
+    window.addEventListener('resize',resize);resize();drawShip();
+})();
+</script>
+</body>
+</html>

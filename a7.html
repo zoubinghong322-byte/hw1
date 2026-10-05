@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>經典 8-Bit 打磚塊遊戲</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: #1a1a1a;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            color: #fff;
+            overflow: hidden;
+        }
+        h1 {
+            margin-bottom: 10px;
+            font-size: 2rem;
+            text-shadow: 0 0 10px rgba(0, 255, 255, 0.5);
+            letter-spacing: 2px;
+        }
+        #game-container {
+            position: relative;
+            box-shadow: 0 0 30px rgba(0, 0, 0, 0.7);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        canvas {
+            background: #111;
+            display: block;
+            border: 4px solid #333;
+            border-radius: 8px;
+        }
+        #start-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            border-radius: 8px;
+            transition: all 0.3s;
+        }
+        .btn {
+            background: linear-gradient(45deg, #00f2fe, #4facfe);
+            border: none;
+            color: white;
+            padding: 12px 30px;
+            font-size: 1.2rem;
+            font-weight: bold;
+            border-radius: 25px;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(0, 242, 254, 0.4);
+            transition: transform 0.1s, box-shadow 0.2s;
+            margin-top: 15px;
+        }
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 242, 254, 0.6);
+        }
+        .btn:active {
+            transform: translateY(1px);
+        }
+        #instructions {
+            margin-top: 20px;
+            font-size: 0.9rem;
+            color: #aaa;
+            text-align: center;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>BRICK BREAKER</h1>
+
+    <div id="game-container">
+        <canvas id="gameCanvas" width="480" height="320"></canvas>
+        <div id="start-screen">
+            <h2 id="screen-title">8-Bit 打磚塊</h2>
+            <p id="screen-desc">點擊下方按鈕啟動音效並開始遊戲</p>
+            <button class="btn" id="start-btn">開始遊戲</button>
+            <div id="instructions">
+                操作方式：<br>
+                滑鼠左右移動，或使用鍵盤方向鍵 ◄ 與 ►
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+        const startScreen = document.getElementById("start-screen");
+        const startBtn = document.getElementById("start-btn");
+        const screenTitle = document.getElementById("screen-title");
+        const screenDesc = document.getElementById("screen-desc");
+
+        // 遊戲狀態
+        let gameState = "START"; // START, PLAYING, GAMEOVER, WIN
+
+        // Web Audio API 音效產生器
+        let audioCtx = null;
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+        }
+
+        function playSound(type) {
+            if (!audioCtx) return;
+            
+            // 確保 AudioContext 在瀏覽器規範下已解鎖
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+
+            const now = audioCtx.currentTime;
+
+            if (type === 'paddle') {
+                // 擊中彈板：短促的中低音嗶聲
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(150, now);
+                osc.frequency.exponentialRampToValueAtTime(300, now + 0.08);
+                gain.gain.setValueAtTime(0.1, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
+                osc.start(now);
+                osc.stop(now + 0.08);
+            } else if (type === 'brick') {
+                // 擊中磚塊：清脆的高音
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(600, now);
+                osc.frequency.exponentialRampToValueAtTime(800, now + 0.05);
+                gain.gain.setValueAtTime(0.15, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.06);
+                osc.start(now);
+                osc.stop(now + 0.06);
+            } else if (type === 'lose') {
+                // 漏球：音調下降的沮喪音
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(300, now);
+                osc.frequency.linearRampToValueAtTime(80, now + 0.4);
+                gain.gain.setValueAtTime(0.2, now);
+                gain.gain.linearRampToValueAtTime(0.01, now + 0.4);
+                osc.start(now);
+                osc.stop(now + 0.4);
+            } else if (type === 'win') {
+                // 破關：經典 8-bit 勝利小調
+                const notes = [261.63, 329.63, 392.00, 523.25]; // C4, E4, G4, C5
+                notes.forEach((freq, index) => {
+                    const noteOsc = audioCtx.createOscillator();
+                    const noteGain = audioCtx.createGain();
+                    noteOsc.connect(noteGain);
+                    noteGain.connect(audioCtx.destination);
+                    
+                    noteOsc.type = 'square';
+                    noteOsc.frequency.setValueAtTime(freq, now + index * 0.12);
+                    
+                    noteGain.gain.setValueAtTime(0.1, now + index * 0.12);
+                    noteGain.gain.exponentialRampToValueAtTime(0.01, now + index * 0.12 + 0.1);
+                    
+                    noteOsc.start(now + index * 0.12);
+                    noteOsc.stop(now + index * 0.12 + 0.1);
+                });
+            }
+        }
+
+        // 遊戲基礎參數設定
+        let ballRadius = 8;
+        let x, y, dx, dy;
+        let paddleHeight = 12;
+        let paddleWidth = 75;
+        let paddleX;
+        let rightPressed = false;
+        let leftPressed = false;
+
+        // 磚塊設定
+        const brickRowCount = 4;
+        const brickColumnCount = 6;
+        const brickWidth = 65;
+        const brickHeight = 18;
+        const brickPadding = 7;
+        const brickOffsetTop = 40;
+        const brickOffsetLeft = 25;
+        const brickColors = ["#ff4757", "#ffa502", "#2ed573", "#1e90ff"];
+        let bricks = [];
+
+        let score = 0;
+        let lives = 3;
+
+        function resetGameData() {
+            x = canvas.width / 2;
+            y = canvas.height - 30;
+            dx = 3;
+            dy = -3;
+            paddleX = (canvas.width - paddleWidth) / 2;
+            score = 0;
+            lives = 3;
+            
+            // 初始化磚塊陣列
+            bricks = [];
+            for (let c = 0; c < brickColumnCount; c++) {
+                bricks[c] = [];
+                for (let r = 0; r < brickRowCount; r++) {
+                    bricks[c][r] = { x: 0, y: 0, status: 1 };
+                }
+            }
+        }
+
+        function resetBallAndPaddle() {
+            x = canvas.width / 2;
+            y = canvas.height - 30;
+            dx = 3;
+            dy = -3;
+            paddleX = (canvas.width - paddleWidth) / 2;
+        }
+
+        // 監聽控制事件
+        document.addEventListener("keydown", keyDownHandler, false);
+        document.addEventListener("keyup", keyUpHandler, false);
+        document.addEventListener("mousemove", mouseMoveHandler, false);
+
+        function keyDownHandler(e) {
+            if (e.key === "Right" || e.key === "ArrowRight") rightPressed = true;
+            else if (e.key === "Left" || e.key === "ArrowLeft") leftPressed = true;
+        }
+
+        function keyUpHandler(e) {
+            if (e.key === "Right" || e.key === "ArrowRight") rightPressed = false;
+            else if (e.key === "Left" || e.key === "ArrowLeft") leftPressed = false;
+        }
+
+        function mouseMoveHandler(e) {
+            const relativeX = e.clientX - canvas.getBoundingClientRect().left;
+            if (relativeX > 0 && relativeX < canvas.width) {
+                paddleX = relativeX - paddleWidth / 2;
+            }
+        }
+
+        // 碰撞偵測
+        function collisionDetection() {
+            let activeBricks = 0;
+            for (let c = 0; c < brickColumnCount; c++) {
+                for (let r = 0; r < brickRowCount; r++) {
+                    let b = bricks[c][r];
+                    if (b.status === 1) {
+                        activeBricks++;
+                        if (x > b.x && x < b.x + brickWidth && y > b.y && y < b.y + brickHeight) {
+                            dy = -dy;
+                            b.status = 0;
+                            score += 10;
+                            playSound('brick');
+                            
+                            // 檢查是否消完所有磚塊
+                            if (activeBricks - 1 === 0) {
+                                playSound('win');
+                                gameState = "WIN";
+                                showScreen("恭喜通關！", `最終得分：${score} 分`, "再玩一次");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 繪製各個物件
+        function drawBall() {
+            ctx.beginPath();
+            ctx.arc(x, y, ballRadius, 0, Math.PI * 2);
+            ctx.fillStyle = "#ffffff";
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = "#ffffff";
+            ctx.fill();
+            ctx.closePath();

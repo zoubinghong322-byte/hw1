@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>經典俄羅斯方塊（完整音效版）</title>
+    <style>
+        body {
+            background-color: #1e1e24;
+            color: #fff;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+        }
+        h1 {
+            margin: 0 0 10px 0;
+            font-size: 32px;
+            letter-spacing: 4px;
+            color: #00ffcc;
+            text-shadow: 0 0 10px rgba(0,255,204,0.5);
+        }
+        #game-container {
+            display: flex;
+            gap: 20px;
+            background: #111116;
+            padding: 20px;
+            border-radius: 15px;
+            box-shadow: 0 0 30px rgba(0,0,0,0.8);
+            border: 2px solid #333344;
+        }
+        canvas {
+            border: 3px solid #444455;
+            background-color: #050508;
+            border-radius: 5px;
+        }
+        #side-panel {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            width: 140px;
+        }
+        .info-box {
+            background: #1a1a24;
+            padding: 10px;
+            border-radius: 8px;
+            text-align: center;
+            border: 1px solid #333344;
+            margin-bottom: 12px;
+        }
+        .info-box h2 {
+            font-size: 12px;
+            margin: 0 0 5px 0;
+            color: #888899;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .info-box p {
+            font-size: 22px;
+            margin: 0;
+            font-weight: bold;
+            color: #00ffcc;
+        }
+        #next-canvas {
+            background: #050508;
+            border: 1px solid #333344;
+            border-radius: 5px;
+            margin-top: 5px;
+        }
+        #controls {
+            font-size: 11px;
+            color: #aaa;
+            line-height: 1.6;
+            background: #1a1a24;
+            padding: 8px;
+            border-radius: 8px;
+            border: 1px solid #222233;
+        }
+        #start-btn {
+            background: #00ffcc;
+            color: #111;
+            border: none;
+            padding: 12px;
+            border-radius: 8px;
+            font-weight: bold;
+            cursor: pointer;
+            font-size: 16px;
+            transition: all 0.2s;
+            box-shadow: 0 4px 10px rgba(0,255,204,0.3);
+            margin-bottom: 10px;
+        }
+        #start-btn:hover {
+            background: #fff;
+            box-shadow: 0 4px 15px rgba(255,255,255,0.5);
+            transform: translateY(-2px);
+        }
+        #start-btn:active {
+            transform: translateY(0);
+        }
+    </style>
+</head>
+<body>
+
+    <h1>TETRIS</h1>
+    <div id="game-container">
+        <!-- 主遊戲畫面 (10格x20格，每格26像素) -->
+        <canvas id="tetris" width="260" height="520"></canvas>
+        
+        <div id="side-panel">
+            <div>
+                <div class="info-box">
+                    <h2>下一個</h2>
+                    <canvas id="next-canvas" width="100" height="100"></canvas>
+                </div>
+                <div class="info-box">
+                    <h2>分數</h2>
+                    <p id="score">0</p>
+                </div>
+                <div class="info-box">
+                    <h2>等級</h2>
+                    <p id="level">1</p>
+                </div>
+            </div>
+            
+            <button id="start-btn" onclick="startGame()">開始遊戲</button>
+            
+            <div id="controls">
+                <b>操作說明：</b><br>
+                ← / → : 左右移動<br>
+                ↑ : 旋轉方塊<br>
+                ↓ : 軟降落<br>
+                Space : 瞬間下落
+            </div>
+        </div>
+    </div>
+
+<script>
+// --- 音效與背景音樂產生器 (Web Audio API) ---
+let audioCtx = null;
+let bgmInterval = null;
+let bgmStep = 0;
+
+function initAudio() {
+    if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+    }
+}
+
+// 播放單一音符
+function playTone(freq, type, duration, vol) {
+    if (!audioCtx) return;
+    try {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + duration);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + duration);
+    } catch (e) { console.log(e); }
+}
+
+// 音效庫
+const sound = {
+    move: () => playTone(150, 'triangle', 0.05, 0.2),
+    rotate: () => playTone(280, 'triangle', 0.06, 0.2),
+    clear: () => {
+        playTone(523.25, 'square', 0.08, 0.2);
+        setTimeout(() => playTone(659.25, 'square', 0.08, 0.2), 80);
+        setTimeout(() => playTone(783.99, 'square', 0.15, 0.2), 160);
+    },
+    gameover: () => {
+        playTone(300, 'sawtooth', 0.2, 0.3);
+        setTimeout(() => playTone(220, 'sawtooth', 0.2, 0.3), 200);
+        setTimeout(() => playTone(150, 'sawtooth', 0.4, 0.3), 400);
+    }
+};
+
+// 經典俄羅斯方塊 BGM 旋律陣列 (A小調)
+const bgmMelody = [
+    659.25, 493.88, 523.25, 587.33, 523.25, 493.88, 440.00, 440.00, 523.25, 659.25, 587.33, 523.25, 493.88, 0, 523.25, 587.33, 659.25, 523.25, 440.00, 440.00, 0,
+    587.33, 698.46, 880.00, 783.99, 698.46, 659.25, 0, 523.25, 659.25, 587.33, 523.25, 493.88, 493.88, 523.25, 587.33, 659.25, 523.25, 440.00, 440.00, 0
+];
+
+function startBGM() {
+    stopBGM();
+    bgmStep = 0;
+    bgmInterval = setInterval(() => {
+        if (gameOver) { stopBGM(); return; }
+        let freq = bgmMelody[bgmStep % bgmMelody.length];
+        if (freq > 0) {
+            playTone(freq, 'triangle', 0.22, 0.05); // 低音量當背景音樂
+        }
+        bgmStep++;
+    }, 240); // 節奏速度
+}
+
+function stopBGM() {
+    if (bgmInterval) {
+        clearInterval(bgmInterval);
+        bgmInterval = null;
+    }
+}
+
+// --- 遊戲主邏輯 ---
+const canvas = document.getElementById('tetris');
+const context = canvas.getContext('2d');
+const nextCanvas = document.getElementById('next-canvas');
+const nextContext = nextCanvas.getContext('2d');
+const grid = 26;
+
+// 修正後的 7 種方塊矩陣 (不使用省略寫法，確保完美解析)
+const SHAPES = {
+    'I': [[0,0,0,0],[1,1,1,1],[0,0,0,0],[0,0,0,0]],
+    'L': [[0,0,2],[2,2,2],[0,0,0]],
+    'J': [[3,0,0],[3,3,3],[0,0,0]],
+    'O': [[4,4],[4,4]],
+    'Z': [[5,5,0],[0,5,5],[0,0,0]],
+    'S': [[0,6,6],[6,6,0],[0,0,0]],
+    'T': [[0,7,0],[7,7,7],[0,0,0]]
+};
+
+const COLORS = {
+    1: '#00f0f0', 2: '#f0a000', 3: '#0000f0',
+    4: '#f0f000', 5: '#f00000', 6: '#00f000', 7: '#a000f0'
+};
+
+let arena = createMatrix(10, 20);
+let player = { pos: {x: 0, y: 0}, matrix: null, type: null };
+let nextPiece = null;
+let score = 0, lines = 0, level = 1;
+let dropCounter = 0;
+let dropInterval = 1000;
+let lastTime = 0;
+let gameOver = true;
+
+function createMatrix(w, h) {
+    const matrix = [];
+    for (let i = 0; i < h; i++) {
+        matrix.push(new Array(w).fill(0));
+    }
+    return matrix;
+}
+
+function getRandomPiece() {
+    const pieces = 'ILJOTSZ';
+    return pieces[pieces.length * Math.random() | 0];
+}
+
+function playerReset() {
+    if (!nextPiece) nextPiece = getRandomPiece();
+    player.type = nextPiece;
+    player.matrix = SHAPES[player.type];
+    nextPiece = getRandomPiece(); // 抽出下一個
+    
+    player.pos.y = 0;
+    player.pos.x = Math.floor(arena[0].length / 2) - Math.floor(player.matrix[0].length / 2);
+    
+    drawNext();
+
+    if (collide(arena, player)) {
+        gameOver = true;
+        stopBGM();
+        sound.gameover();
+        alert('遊戲結束！您的得分是: ' + score);
+    }
+}
+
+function collide(arena, player) {
+    const m = player.matrix;
+    const o = player.pos;
+    for (let y = 0; y < m.length; ++y) {
+        for (let x = 0; x < m[y].length; ++x) {
+            if (m[y][x] !== 0) {
+                if (!arena[y + o.y] || arena[y + o.y][x + o.x] !== 0) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+function merge(arena, player) {
+    player.matrix.forEach((row, y) => {
+        row.forEach((value, x) => {
+            if (value !== 0) {
+                arena[y + player.pos.y][x + player.pos.x] = value;
+            }
+        });
+    });
+}
+
+function drawBlock(ctx, x, y, color, size = grid) {
+    ctx.fillStyle = color;
+    ctx.fillRect(x * size, y * size, size, size);
+    ctx.strokeStyle = '#111116';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(x * size, y * size, size, size);
+    
+    // 內縮高光，讓畫面更精緻
+    ctx.fillStyle = 'rgba(255,255,255,0.15)';
+    ctx.fillRect(x * size + 2, y * size + 2, size - 4, 3);
+}
+
+function draw() {
+    context.fillStyle = '#050508';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // 繪製地圖上已固定的方塊
+    arena.forEach((row, y) => {
+        row.forEach((value, x) => {
+            if (value !== 0) drawBlock(context, x, y, COLORS[value]);
+        });
+    });
+    
+    // 繪製玩家方塊
+    if (player.matrix) {
+        player.matrix.forEach((row, y) => {
+            row.forEach((value, x) => {
+                if (value !== 0) drawBlock(context, x + player.pos.x, y + player.pos.y, COLORS[value]);
+            });
+        });
+    }
+}
+
+// 繪製右側「下一個方塊」預覽
+function drawNext() {
+    nextContext.fillStyle = '#050508';
+    nextContext.fillRect(0, 0, nextCanvas.width, nextCanvas.height);
+    
+    const matrix = SHAPES[nextPiece];
+    const size = 20; // 預覽視窗格子縮小一點
+    const offsetX = (nextCanvas.width - matrix[0].length * size) / 2 / size;
+    const offsetY = (nextCanvas.height - matrix.length * size) / 2 / size;
+    
+    matrix.forEach((row, y) => {
+        row.forEach((value, x) => {
+            if (value !== 0) {
